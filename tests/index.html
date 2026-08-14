@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Off the clock — smoke tests</title>
+    <style>
+      body {
+        font-family: system-ui, sans-serif;
+        max-width: 40rem;
+        margin: 2rem auto;
+        padding: 0 1rem;
+        line-height: 1.5;
+      }
+      code {
+        font-family: ui-monospace, monospace;
+        font-size: 0.85em;
+      }
+      ul {
+        padding-left: 1.2rem;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>Smoke tests</h1>
+    <p>
+      Covers <code>js/dates.js</code> and the read/write accessors in
+      <code>js/store.js</code>. Runs against this browser's real IndexedDB,
+      but only ever writes one disposable record (id prefixed
+      <code>smoketest-</code>) and removes it immediately — it does not
+      touch your actual journal, goals, or place data.
+    </p>
+    <div id="results">Running…</div>
+    <script type="module" src="./smoke.js"></script>
+  </body>
+</html>

@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="en" data-theme="light">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="theme-color" content="#2c5a4e" />
+    <meta
+      name="description"
+      content="Trip planner, goal keeper and notebook for a sabbatical on the Oregon coast, Sep 8 – Oct 9 2026."
+    />
+    <title>Off the clock — Sep 8 to Oct 9</title>
+
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,400;12..96,600;12..96,700;12..96,800&family=IBM+Plex+Mono:wght@400;500&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="./styles/main.css" />
+  </head>
+
+  <body>
+    <app-layout theme="light">
+      <day-strip slot="strip"></day-strip>
+
+      <app-tabs>
+        <tab-panel label="Places">
+          <place-list></place-list>
+        </tab-panel>
+
+        <tab-panel label="What's on">
+          <event-list></event-list>
+        </tab-panel>
+
+        <tab-panel label="Goals">
+          <goal-board></goal-board>
+        </tab-panel>
+
+        <tab-panel label="Notes">
+          <journal-log></journal-log>
+        </tab-panel>
+      </app-tabs>
+    </app-layout>
+
+    <app-modal></app-modal>
+
+    <script type="module" src="./js/main.js"></script>
+  </body>
+</html>
