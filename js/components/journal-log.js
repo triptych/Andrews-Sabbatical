@@ -363,13 +363,29 @@ export class JournalLog extends HTMLElement {
     this.#paint();
   }
 
-  /** Reload place/event/goal state and repaint the "planned for this day" panel. */
+  /** Reload place/event/goal state and repaint the "planned for this day" panel.
+   * Uses allSettled rather than all — one store failing to read shouldn't
+   * blank out the other two, and a failure here shouldn't silently strand
+   * the panel showing stale/empty content forever. */
   async #loadContext() {
-    [this.#placeState, this.#goals, this.#customEvents] = await Promise.all([
+    const [places, goals, customEvents] = await Promise.allSettled([
       store.all('placeState'),
       store.all('goals'),
       store.all('customEvents'),
     ]);
+
+    const failed = [];
+    if (places.status === 'fulfilled') this.#placeState = places.value;
+    else failed.push('places'), console.error('journal-log: could not load placeState', places.reason);
+    if (goals.status === 'fulfilled') this.#goals = goals.value;
+    else failed.push('goals'), console.error('journal-log: could not load goals', goals.reason);
+    if (customEvents.status === 'fulfilled') this.#customEvents = customEvents.value;
+    else failed.push('your events'), console.error('journal-log: could not load customEvents', customEvents.reason);
+
+    if (failed.length > 0) {
+      bus.emit('layout:toast', `Couldn't refresh ${failed.join(', ')} for the planned-for-this-day list — check the browser console`);
+    }
+
     try {
       this.#savedEventIds = new Set(JSON.parse(localStorage.getItem(SAVED_KEY) ?? '[]'));
     } catch {
@@ -389,46 +405,52 @@ export class JournalLog extends HTMLElement {
       ? formatLong(date)
       : `${formatLong(date)} — outside Sep 8 – Oct 9`;
 
-    const items = [];
-
-    for (const place of this.#placeState) {
-      if (place.plannedDate !== date) continue;
-      const found = PLACES.find((p) => p.id === place.id);
-      if (found) items.push({ kind: 'place', label: found.name, note: place.note });
-    }
-
-    const yourEvents = [
-      ...EVENTS.filter((event) => this.#savedEventIds.has(event.id)),
-      ...this.#customEvents,
-    ];
-    for (const event of yourEvents) {
-      if (date < event.start || date > (event.end ?? event.start)) continue;
-      const note = [event.where, event.end && event.end !== event.start ? formatRange(event.start, event.end) : '']
-        .filter(Boolean)
-        .join(' — ');
-      items.push({ kind: 'event', label: event.name, note });
-    }
-
-    for (const goal of this.#goals) {
-      if (!goal.start) continue;
-      if (date < goal.start || date > (goal.end ?? goal.start)) continue;
-      const note = goal.end && goal.end !== goal.start ? formatRange(goal.start, goal.end) : '';
-      items.push({ kind: 'goal', label: goal.text, note });
-    }
-
     const container = root.querySelector('#planned');
-    container.innerHTML =
-      items.length === 0
-        ? `<p class="planned-empty">Nothing planned for this day yet — pin a place to it, save an event, or set a goal's dates.</p>`
-        : `<ul class="planned-list">${items
-            .map(
-              (item) => `
-              <li class="planned-item" data-kind="${item.kind}">
-                <i class="dot"></i>
-                <span><b>${escapeHtml(item.label)}</b>${item.note ? ` <span class="dim">— ${escapeHtml(item.note)}</span>` : ''}</span>
-              </li>`,
-            )
-            .join('')}</ul>`;
+
+    try {
+      const items = [];
+
+      for (const place of this.#placeState) {
+        if (place.plannedDate !== date) continue;
+        const found = PLACES.find((p) => p.id === place.id);
+        if (found) items.push({ kind: 'place', label: found.name, note: place.note });
+      }
+
+      const yourEvents = [
+        ...EVENTS.filter((event) => this.#savedEventIds.has(event.id)),
+        ...this.#customEvents,
+      ];
+      for (const event of yourEvents) {
+        if (date < event.start || date > (event.end ?? event.start)) continue;
+        const note = [event.where, event.end && event.end !== event.start ? formatRange(event.start, event.end) : '']
+          .filter(Boolean)
+          .join(' — ');
+        items.push({ kind: 'event', label: event.name, note });
+      }
+
+      for (const goal of this.#goals) {
+        if (!goal.start) continue;
+        if (date < goal.start || date > (goal.end ?? goal.start)) continue;
+        const note = goal.end && goal.end !== goal.start ? formatRange(goal.start, goal.end) : '';
+        items.push({ kind: 'goal', label: goal.text, note });
+      }
+
+      container.innerHTML =
+        items.length === 0
+          ? `<p class="planned-empty">Nothing planned for this day yet — pin a place to it, save an event, or set a goal's dates.</p>`
+          : `<ul class="planned-list">${items
+              .map(
+                (item) => `
+                <li class="planned-item" data-kind="${item.kind}">
+                  <i class="dot"></i>
+                  <span><b>${escapeHtml(item.label)}</b>${item.note ? ` <span class="dim">— ${escapeHtml(item.note)}</span>` : ''}</span>
+                </li>`,
+              )
+              .join('')}</ul>`;
+    } catch (error) {
+      console.error('journal-log: could not paint the planned-for-this-day list', error);
+      container.innerHTML = `<p class="planned-empty">Couldn't load what's planned for this day — check the browser console.</p>`;
+    }
   }
 
   #renderShell() {

@@ -331,14 +331,26 @@ export class DayStrip extends HTMLElement {
     this.#unsubscribe = [];
   }
 
-  /** Re-read stored data and repaint the strip. */
+  /** Re-read stored data and repaint the strip. Uses allSettled rather than
+   * all — one store failing to read shouldn't blank out the other three,
+   * or leave the whole strip silently stuck showing stale data. */
   async refresh() {
-    const [entries, placeState, goals, customEvents] = await Promise.all([
+    const results = await Promise.allSettled([
       store.all('entries'),
       store.all('placeState'),
       store.all('goals'),
       store.all('customEvents'),
     ]);
+    const names = ['entries', 'places', 'goals', 'your events'];
+    const [entries, placeState, goals, customEvents] = results.map((r, i) => {
+      if (r.status === 'fulfilled') return r.value;
+      console.error(`day-strip: could not load ${names[i]}`, r.reason);
+      return [];
+    });
+    const failed = results.filter((r) => r.status === 'rejected').length;
+    if (failed > 0) {
+      bus.emit('layout:toast', `The day strip couldn't fully refresh (${failed} of 4 lists failed to load) — check the browser console`);
+    }
 
     this.#logged = new Set(entries.map((entry) => entry.date));
 
