@@ -10,6 +10,8 @@
  *   goals        { id, text, kind, done, notes, start, end, created }
  *   placeState   { id, status, note, plannedDate }
  *   customEvents { id, name, where, start, end, note, tags, created }
+ *   customIdeas  { id, text, tags, created } — ideas you've added yourself
+ *                in the Ideas tab, folded into that tab's spin pool
  *
  * A few small bits of state live in localStorage instead (theme, last-open
  * tab, saved events — see SAVED_EVENTS_KEY below) because they're simple
@@ -27,8 +29,18 @@ const DB_NAME = 'sabbatical';
  *
  *   1 -> 2  added the `customEvents` store (hand-added events, distinct
  *           from the curated list in data/events.js).
+ *   2 -> 3  added the `customIdeas` store (hand-added ideas, distinct from
+ *           the curated list in data/ideas.js).
+ *   3 -> 4  re-run of the 2 -> 3 upgrade. Some browsers ended up with a
+ *           database reporting version 3 without `customIdeas` actually
+ *           created (the upgrade transaction didn't take, and because the
+ *           version number already matched, later loads never triggered
+ *           `onupgradeneeded` again to retry it). Bumping the number forces
+ *           every client through the upgrade path once more; the `if (!db.
+ *           objectStoreNames.contains(...))` guards below make it a no-op
+ *           for stores that already exist, so nothing else is touched.
  */
-const DB_VERSION = 2;
+const DB_VERSION = 4;
 
 /** localStorage key for the ids of events you've saved in What's On. */
 const SAVED_EVENTS_KEY = 'sabbatical:events';
@@ -62,9 +74,29 @@ function openDb() {
         const customEvents = db.createObjectStore('customEvents', { keyPath: 'id' });
         customEvents.createIndex('start', 'start');
       }
+      if (!db.objectStoreNames.contains('customIdeas')) {
+        db.createObjectStore('customIdeas', { keyPath: 'id' });
+      }
     };
 
-    request.onsuccess = () => resolve(request.result);
+    // If another tab is holding an older-version connection open, the
+    // upgrade above can't run until that tab closes or drops its connection
+    // — indexedDB fires `blocked` instead of ever resolving `onsuccess`.
+    // Surface that as a toast rather than hanging forever with no feedback.
+    request.onblocked = () => {
+      bus.emit(
+        'layout:toast',
+        'Storage is waiting on another open tab of this app — close other tabs and reload',
+      );
+    };
+
+    request.onsuccess = () => {
+      const db = request.result;
+      // If a later version opens elsewhere, drop this connection so that
+      // tab isn't left blocking the new one's upgrade.
+      db.onversionchange = () => db.close();
+      resolve(db);
+    };
     request.onerror = () => reject(request.error);
   });
 
@@ -73,6 +105,11 @@ function openDb() {
 
 async function tx(storeName, mode, work) {
   const db = await openDb();
+  if (!db.objectStoreNames.contains(storeName)) {
+    throw new Error(
+      `The "${storeName}" storage area isn't set up yet — close every other tab of this app, then reload.`,
+    );
+  }
   return new Promise((resolve, reject) => {
     const transaction = db.transaction(storeName, mode);
     const store = transaction.objectStore(storeName);
@@ -105,7 +142,7 @@ export function newId() {
 export const store = {
   /**
    * Read every record in a store, newest first where a `created` field exists.
-   * @param {'entries'|'photos'|'goals'|'placeState'|'customEvents'} name
+   * @param {'entries'|'photos'|'goals'|'placeState'|'customEvents'|'customIdeas'} name
    */
   async all(name) {
     const rows = await tx(name, 'readonly', (s) => s.getAll());
@@ -182,12 +219,13 @@ function readSavedEvents() {
  * data URLs, so a backup with a lot of photos in it will be large.
  */
 export async function exportAll() {
-  const [entries, photos, goals, placeState, customEvents] = await Promise.all([
+  const [entries, photos, goals, placeState, customEvents, customIdeas] = await Promise.all([
     store.all('entries'),
     store.all('photos'),
     store.all('goals'),
     store.all('placeState'),
     store.all('customEvents'),
+    store.all('customIdeas'),
   ]);
 
   const encodedPhotos = await Promise.all(
@@ -200,13 +238,14 @@ export async function exportAll() {
 
   return {
     format: 'sabbatical-backup',
-    version: 3,
+    version: 4,
     exported: new Date().toISOString(),
     entries,
     photos: encodedPhotos,
     goals,
     placeState,
     customEvents,
+    customIdeas,
     savedEvents: readSavedEvents(),
   };
 }
@@ -214,11 +253,12 @@ export async function exportAll() {
 /**
  * Replace the current contents with a backup produced by exportAll. Older
  * backups don't have every field — version 1 has no `savedEvents`, version
- * 2 has no `customEvents`. Restoring either clears the missing store to
- * empty, same as it clears every other store, so "restore" consistently
- * means "replace everything" regardless of backup age.
+ * 2 has no `customEvents`, version 3 has no `customIdeas`. Restoring any of
+ * these clears the missing store to empty, same as it clears every other
+ * store, so "restore" consistently means "replace everything" regardless of
+ * backup age.
  * @param {object} backup
- * @returns {Promise<{entries:number, photos:number, goals:number, places:number, events:number, customEvents:number}>}
+ * @returns {Promise<{entries:number, photos:number, goals:number, places:number, events:number, customEvents:number, customIdeas:number}>}
  */
 export async function importAll(backup) {
   if (backup?.format !== 'sabbatical-backup') {
@@ -226,13 +266,14 @@ export async function importAll(backup) {
   }
 
   await Promise.all(
-    ['entries', 'photos', 'goals', 'placeState', 'customEvents'].map((name) => store.clear(name)),
+    ['entries', 'photos', 'goals', 'placeState', 'customEvents', 'customIdeas'].map((name) => store.clear(name)),
   );
 
   for (const entry of backup.entries ?? []) await store.put('entries', entry);
   for (const goal of backup.goals ?? []) await store.put('goals', goal);
   for (const place of backup.placeState ?? []) await store.put('placeState', place);
   for (const event of backup.customEvents ?? []) await store.put('customEvents', event);
+  for (const idea of backup.customIdeas ?? []) await store.put('customIdeas', idea);
   for (const photo of backup.photos ?? []) {
     const { dataUrl, ...rest } = photo;
     await store.put('photos', { ...rest, blob: await dataUrlToBlob(dataUrl) });
@@ -248,6 +289,7 @@ export async function importAll(backup) {
     places: backup.placeState?.length ?? 0,
     events: savedEvents.length,
     customEvents: backup.customEvents?.length ?? 0,
+    customIdeas: backup.customIdeas?.length ?? 0,
   };
 }
 

@@ -114,6 +114,21 @@ async function run() {
     assert(gone === undefined, 'record still present after remove');
   });
 
+  await test('customIdeas store round trip (disposable record)', async () => {
+    const id = `smoketest-${newId()}`;
+    const record = { id, text: 'smoke test idea', tags: ['home'], created: Date.now() };
+    try {
+      await store.put('customIdeas', record);
+      const back = await store.get('customIdeas', id);
+      assert(back?.id === id, 'read-back record missing or id mismatch');
+      assert(back?.text === 'smoke test idea', 'read-back record text mismatch');
+    } finally {
+      await store.remove('customIdeas', id);
+    }
+    const gone = await store.get('customIdeas', id);
+    assert(gone === undefined, 'record still present after remove');
+  });
+
   await test('exportAll returns the expected shape (read-only)', async () => {
     const data = await exportAll();
     assert(data.format === 'sabbatical-backup', 'unexpected format field');
@@ -123,6 +138,7 @@ async function run() {
     assert(Array.isArray(data.placeState), 'placeState should be an array');
     assert(Array.isArray(data.savedEvents), 'savedEvents should be an array');
     assert(Array.isArray(data.customEvents), 'customEvents should be an array');
+    assert(Array.isArray(data.customIdeas), 'customIdeas should be an array');
   });
 
   await test('importAll rejects a non-backup file before touching storage', async () => {

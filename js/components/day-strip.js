@@ -3,7 +3,7 @@ import { bus } from '../events/bus.js';
 import { store } from '../store.js';
 import { EVENTS } from '../data/events.js';
 import { PLACES } from '../data/places.js';
-import { DAYS, TOTAL_DAYS, formatLong, formatRange, status, today } from '../dates.js';
+import { DAYS, TOTAL_DAYS, formatLong, formatShort, formatRange, status, today, inWindow } from '../dates.js';
 
 const css = String.raw;
 
@@ -38,6 +38,11 @@ local.replaceSync(css`
 
   .reading b {
     color: var(--ink);
+    font-weight: 600;
+  }
+
+  .reading .focused {
+    color: var(--cranberry);
     font-weight: 600;
   }
 
@@ -112,6 +117,13 @@ local.replaceSync(css`
     background: var(--ink);
     height: 46px;
     border-radius: 1px;
+  }
+
+  /* The day currently focused (via the strip or the journal) — a ring
+     around the block so it reads distinctly from "today" when the two
+     diverge, and stacks visibly when they're the same day. */
+  .tick[data-focused='true'] .block {
+    box-shadow: 0 0 0 2px var(--paper), 0 0 0 4px var(--cranberry);
   }
 
   /* Small bars stacked inside the block — one per kind of thing on that
@@ -203,6 +215,10 @@ local.replaceSync(css`
   .swatch--event { background: var(--tide); }
   .swatch--goal { background: var(--sand); }
   .swatch--today { background: var(--ink); }
+  .swatch--focused {
+    background: var(--paper);
+    box-shadow: 0 0 0 2px var(--cranberry);
+  }
 
   /* ——— tooltip ——— */
 
@@ -307,6 +323,10 @@ export class DayStrip extends HTMLElement {
   #goals = new Map();
   #filter = null;
   #hideTimer = null;
+  /** The day the app is currently pointed at — defaults to today on load
+   * (clamped into the sabbatical window if today falls outside it), and
+   * follows wherever the journal is asked to open. */
+  #focused = inWindow(today()) ? today() : DAYS[0];
 
   connectedCallback() {
     if (!this.shadowRoot) {
@@ -323,6 +343,10 @@ export class DayStrip extends HTMLElement {
       bus.on('goals:changed', () => this.refresh()),
       bus.on('events:changed', () => this.refresh()),
       bus.on('events:restored', () => this.refresh()),
+      bus.on('journal:open-day', (event) => {
+        this.#focused = event.detail.date;
+        this.#paint();
+      }),
     );
   }
 
@@ -435,6 +459,9 @@ export class DayStrip extends HTMLElement {
         </button>
         <span class="filter filter--static">
           <i class="swatch swatch--today"></i> today
+        </span>
+        <span class="filter filter--static">
+          <i class="swatch swatch--focused"></i> focused
         </span>
       </div>
       <div class="tooltip" id="tooltip" role="tooltip" hidden></div>
@@ -560,6 +587,7 @@ export class DayStrip extends HTMLElement {
 
       tick.dataset.state = value;
       tick.dataset.today = String(day === now);
+      tick.dataset.focused = String(day === this.#focused);
 
       const bars = tick.querySelector('.bars');
       bars.innerHTML = [
@@ -582,13 +610,20 @@ export class DayStrip extends HTMLElement {
     const reading = this.shadowRoot.querySelector('#reading');
     const written = this.#logged.size;
 
+    let text;
     if (state.phase === 'before') {
-      reading.innerHTML = `starts in <b>${state.untilStart}</b> days &middot; <b>${this.#planned.size}</b> planned`;
+      text = `starts in <b>${state.untilStart}</b> days &middot; <b>${this.#planned.size}</b> planned`;
     } else if (state.phase === 'during') {
-      reading.innerHTML = `day <b>${state.dayNumber}</b> of ${TOTAL_DAYS} &middot; <b>${state.remaining}</b> left &middot; <b>${written}</b> written up`;
+      text = `day <b>${state.dayNumber}</b> of ${TOTAL_DAYS} &middot; <b>${state.remaining}</b> left &middot; <b>${written}</b> written up`;
     } else {
-      reading.innerHTML = `finished &middot; <b>${written}</b> of ${TOTAL_DAYS} days written up`;
+      text = `finished &middot; <b>${written}</b> of ${TOTAL_DAYS} days written up`;
     }
+
+    const focusLabel = formatShort(this.#focused);
+    const focusNote = this.#focused === now
+      ? `looking at <span class="focused">today</span>, ${escapeHtml(focusLabel)}`
+      : `looking at <span class="focused">${escapeHtml(focusLabel)}</span>`;
+    reading.innerHTML = `${text} &middot; ${focusNote}`;
   }
 }
 

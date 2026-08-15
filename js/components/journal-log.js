@@ -331,7 +331,7 @@ export class JournalLog extends HTMLElement {
     this.#loadContext();
     this.#unsubscribe.push(
       bus.on('entries:changed', () => this.refresh()),
-      bus.on('journal:open-day', (event) => this.focusDay(event.detail.date)),
+      bus.on('journal:open-day', (event) => this.focusDay(event.detail.date, event.detail.draft)),
       bus.on('places:changed', () => this.#loadContext()),
       bus.on('goals:changed', () => this.#loadContext()),
       bus.on('events:changed', () => this.#loadContext()),
@@ -345,13 +345,21 @@ export class JournalLog extends HTMLElement {
     this.#revokeAll();
   }
 
-  /** Point the composer at a specific day and scroll it into view. */
-  focusDay(date) {
+  /**
+   * Point the composer at a specific day and scroll it into view.
+   * @param {string} date
+   * @param {string} [draft]  Optional title to prefill — used by the idea
+   *   picker to hand off what it landed on. Only fills an empty title so it
+   *   never clobbers something you were already writing.
+   */
+  focusDay(date, draft) {
     const field = this.shadowRoot.querySelector('#date');
     field.value = inWindow(date) ? date : today();
     this.#paintPlanned();
     this.scrollIntoView({ behavior: 'smooth', block: 'start' });
-    this.shadowRoot.querySelector('#title').focus();
+    const title = this.shadowRoot.querySelector('#title');
+    if (draft && !title.value.trim()) title.value = draft;
+    title.focus();
   }
 
   /** Reload entries and photos and repaint the log. */
@@ -683,7 +691,7 @@ export class JournalLog extends HTMLElement {
       bus.emit('events:restored');
       bus.emit(
         'layout:toast',
-        `Restored ${counts.entries} entries, ${counts.photos} photos, ${counts.goals} goals, ${counts.events} saved events, ${counts.customEvents} of your own events`,
+        `Restored ${counts.entries} entries, ${counts.photos} photos, ${counts.goals} goals, ${counts.events} saved events, ${counts.customEvents} of your own events, ${counts.customIdeas} of your own ideas`,
       );
     } catch (error) {
       bus.emit('layout:toast', error.message ?? 'That file could not be read.');

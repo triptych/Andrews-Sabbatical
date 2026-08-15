@@ -10,6 +10,7 @@ import './components/day-strip.js';
 import './components/place-list.js';
 import './components/event-list.js';
 import './components/goal-board.js';
+import './components/idea-picker.js';
 import './components/journal-log.js';
 
 import { bus } from './events/bus.js';
@@ -22,7 +23,7 @@ const tabs = document.querySelector('app-tabs');
 layout.setAttribute('theme', localStorage.getItem('sabbatical:theme') ?? 'light');
 
 /* Tab badges: each panel reports its own count over the bus. */
-const TAB_INDEX = { places: 0, events: 1, goals: 2, journal: 3 };
+const TAB_INDEX = { places: 0, events: 1, goals: 2, ideas: 3, journal: 4 };
 
 bus.on('places:count', ({ detail }) => tabs.setCount(TAB_INDEX.places, detail.saved));
 bus.on('events:changed', ({ detail }) => tabs.setCount(TAB_INDEX.events, detail.saved));
