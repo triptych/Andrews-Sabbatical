@@ -166,18 +166,39 @@ local.replaceSync(css`
     font-size: 0.8125rem;
   }
 
-  .planned {
-    font-family: var(--mono);
-    font-size: 0.75rem;
-    color: var(--cranberry);
+  .pin {
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
     margin-left: auto;
+    padding: 0.3rem 0.5rem;
+    background: var(--fog);
+    border-radius: var(--radius);
+  }
+
+  .pin label {
+    margin: 0;
+    font-family: var(--mono);
+    font-size: 0.6875rem;
+    letter-spacing: 0.02em;
+    color: var(--ink-faint);
+    white-space: nowrap;
+  }
+
+  .pin[data-pinned='true'] {
+    background: var(--cranberry-wash);
+  }
+
+  .pin[data-pinned='true'] label {
+    color: var(--cranberry);
   }
 
   input[type='date'].when {
     width: auto;
-    padding: 0.3rem 0.45rem;
+    padding: 0.2rem 0.35rem;
     font-size: 0.8125rem;
     font-family: var(--mono);
+    background: var(--surface);
   }
 
   .note {
@@ -322,7 +343,18 @@ export class PlaceList extends HTMLElement {
     this.#state.set(id, next);
     await store.put('placeState', next);
     bus.emit('places:changed', { id });
-    bus.emit('layout:toast', `Saved — ${PLACES.find((p) => p.id === id).name}`);
+
+    const name = PLACES.find((p) => p.id === id).name;
+    if ('plannedDate' in patch) {
+      bus.emit(
+        'layout:toast',
+        patch.plannedDate
+          ? `Pinned ${name} to ${formatShort(patch.plannedDate)} — it'll show up on that day in the strip and in Notes`
+          : `Unpinned ${name}`,
+      );
+    } else {
+      bus.emit('layout:toast', `Saved — ${name}`);
+    }
   }
 
   #matches(place) {
@@ -406,10 +438,12 @@ export class PlaceList extends HTMLElement {
           <button class="btn btn--quiet" type="button" data-action="note" data-id="${place.id}">
             ${state.note ? 'Edit note' : 'Add note'}
           </button>
-          <label class="visually-hidden" for="when-${place.id}">Date planned for ${place.name}</label>
-          <input class="when" type="date" id="when-${place.id}" data-id="${place.id}"
-                 min="${START}" max="${END}" value="${state.plannedDate ?? ''}">
-          ${state.plannedDate ? `<span class="planned">${formatShort(state.plannedDate)}</span>` : ''}
+          <div class="pin" data-pinned="${Boolean(state.plannedDate)}">
+            <label for="when-${place.id}">${state.plannedDate ? `Pinned — ${formatShort(state.plannedDate)}` : 'Pin to a date'}</label>
+            <input class="when" type="date" id="when-${place.id}" data-id="${place.id}"
+                   min="${START}" max="${END}" value="${state.plannedDate ?? ''}"
+                   aria-label="Date planned for ${place.name}">
+          </div>
         </div>
       </li>`;
   }

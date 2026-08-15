@@ -38,24 +38,39 @@ tags — `cozy`, `quirky`, `coast`, `nature`, `tidepools`, `town`, `wildlife`,
 `rainy-day`, `free`). Mark somewhere as *want to go* or *been*, attach a
 note, or pin it to a date. Pinning a date lights that day up on the strip.
 
-**What's on** — 25 events that fall inside the window, plus two good ones
-("near misses") just past the end in case you want to stretch. Filter by
-coast, quirky, harvest, music, "only my picks," or under 90 minutes' drive.
-"Open in Notes" jumps to the composer with that day already selected.
+**What's on** — 25 curated events that fall inside the window, plus two good
+ones ("near misses") just past the end in case you want to stretch, plus
+anything you add yourself under "Add your own event" (name, where, dates,
+optional drive time, note and tags — a "yours" chip marks them apart, and
+they can be removed). Filter by coast, quirky, harvest, music, "only my
+picks" (which includes everything you've added), or under 90 minutes'
+drive. "Open in Notes" jumps to the composer with that day already
+selected. An event with an `end` date spans multiple days and lights up
+every one of them on the day strip.
 
 **Goals** — split into projects (have a finish line, get checked off) and
-goals (a way to spend the time, get progress notes instead).
+goals (a way to spend the time, get progress notes instead). Either kind
+can optionally carry a start/end date range (the "dates" button on each
+item) — set one and that goal lights up on the day strip for every day in
+range.
 
-**Notes** — one entry per day, with photos. Drag images onto the drop zone
-or click to pick. Click any photo in the log to open it larger. Export/
-restore the whole journal as a JSON backup.
+**Notes** — one entry per day, with photos. The composer always shows which
+day you're on in plain language ("You're on Sunday, September 13") right
+above a "planned for this day" list — anything pinned, saved, or scheduled
+for that date from Places, What's On or Goals, so you can see the Coburg
+Antique Fair (or whatever else) without having to remember you saved it.
+Both update the moment you change the date, whether by typing, using the
+picker, or jumping in from a day-strip block or an event's "Open in Notes"
+button. Drag images onto the drop zone or click to pick. Click any photo in
+the log to open it larger. Export/restore the whole journal as a JSON
+backup.
 
 ## The day strip
 
-The bar under the masthead is 32 ticks, one per day of the sabbatical.
-Height and color encode state:
+The bar under the masthead is 32 blocks, one per day of the sabbatical.
+Height and background color encode the day's headline state:
 
-| Tick | Meaning |
+| Block | Meaning |
 | --- | --- |
 | short, grey | still ahead of you |
 | short, sage | elapsed with nothing logged |
@@ -63,20 +78,41 @@ Height and color encode state:
 | tall, kelp | you've written that day up |
 | full height, black | today |
 
-Click any tick to open that day in Notes.
+A day can carry more than one kind of thing at once, though — written up
+*and* home to an event, say. Small colored bars stacked inside each block
+show that finer detail: kelp for a journal entry, cranberry for a planned
+place visit, blue (tide) for an event happening that day (from your saved
+picks in What's On or anything you added yourself), and gold (sand) for a
+goal whose date range includes that day. A bar is only drawn when it isn't
+already redundant with the block's own color — e.g. a written-up day
+doesn't also draw a kelp bar. Multi-day events and goal ranges light up
+every day they span, not just the start.
+
+Hover or focus a block for a tooltip with the specifics — full date, plus
+one line per journal entry, planned visit, event and goal on it.
+
+The row of chips below the strip filters *which* days stand out: click
+"anything" to dim every day with nothing on it, or one of the specific
+kinds (written up / booked / event / goal) to dim every day without that
+particular kind. Days aren't hidden or reordered — only dimmed — since a
+block's position in the strip is itself information (which day of the trip
+it is).
+
+Click any block to open that day in Notes.
 
 ## Your data
 
 Most of what you create lives in **IndexedDB**, in a database named
-`sabbatical` (currently version 1 — see the migration note in `js/store.js`
-before ever bumping it), with four object stores:
+`sabbatical` (currently version 2 — see the migration note in `js/store.js`
+before ever bumping it again), with five object stores:
 
 | Store | Shape | Notes |
 | --- | --- | --- |
 | `entries` | `{ id, date, title, body, placeId, created, updated }` | one journal entry; indexed by `date` |
 | `photos` | `{ id, entryId, date, blob, caption, created }` | real `Blob`s; indexed by `date` |
-| `goals` | `{ id, text, kind, done, notes, created }` | `kind` is `project` or `goal` |
+| `goals` | `{ id, text, kind, done, notes, start, end, created }` | `kind` is `project` or `goal`; `start`/`end` are optional YYYY-MM-DD |
 | `placeState` | `{ id, status, note, plannedDate }` | `status` is `none`, `want` or `been`; `id` matches a place in `data/places.js` |
+| `customEvents` | `{ id, name, where, start, end, drive, note, tags, created }` | events you added yourself in What's On; `end`, `drive`, `note`, `tags` are optional; indexed by `start` |
 
 IndexedDB rather than localStorage specifically because of photos — they're
 stored as real `Blob`s, and localStorage's ~5 MB ceiling would have died on
@@ -154,12 +190,12 @@ Messages in use:
 | `journal:open-day` | `{ date }` | `day-strip`, `event-list` | `journal-log` (focuses composer), `main.js` (switches to Notes tab) |
 | `entries:changed` | — | `journal-log` | `day-strip`, `journal-log` itself |
 | `entries:count` | `{ total }` | `journal-log` | `main.js` (Notes tab badge) |
-| `goals:changed` | — | `goal-board` | `goal-board` itself |
+| `goals:changed` | — | `goal-board` | `day-strip`, `journal-log` (planned-for-this-day list), `goal-board` itself |
 | `goals:count` | `{ total }` | `goal-board` | `main.js` (Goals tab badge) |
-| `places:changed` | `{ id }` | `place-list` | `day-strip`, `place-list` itself |
+| `places:changed` | `{ id }` | `place-list` | `day-strip`, `journal-log` (planned-for-this-day list), `place-list` itself |
 | `places:count` | `{ total, saved }` | `place-list` | `main.js` (Places tab badge) |
-| `events:changed` | `{ saved }` | `event-list` (on save/unsave, and after a restore) | `main.js` (What's On tab badge) |
-| `events:restored` | — | `journal-log`, after a successful restore | `event-list` (reloads saved ids from localStorage) |
+| `events:changed` | `{ saved }` | `event-list` (on save/unsave, adding/removing a custom event, and after a restore) | `day-strip`, `journal-log` (planned-for-this-day list), `main.js` (What's On tab badge) |
+| `events:restored` | — | `journal-log`, after a successful restore | `event-list` (reloads saved ids and custom events), `day-strip`, `journal-log` itself (planned-for-this-day list) |
 
 Each component also fires plain DOM `CustomEvent`s where a parent needs
 them directly rather than over the bus: `app-tabs` dispatches `tabs:change`

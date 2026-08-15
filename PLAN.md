@@ -86,7 +86,20 @@ throwaway browser profile" as the remaining manual check there.
 - No offline support. Since everything already lives in IndexedDB, a
   minimal service worker caching the static shell would let the journal
   work with no signal on the coast.
-- `formatRange()` in `dates.js` is still unused anywhere in the codebase —
-  either wire it in (e.g. multi-day event display in `event-list.js`,
-  which currently hand-rolls the same range formatting inline) or remove
-  it.
+- ✅ `formatRange()` in `dates.js` is now wired in — `event-list.js` uses it
+  for the when-column instead of hand-rolling the same range formatting,
+  and `day-strip.js`/`goal-board.js` use it for tooltip and goal date-range
+  text.
+
+## 7. Day strip: richer per-day detail (done)
+
+The day strip now aggregates four kinds of thing per day — journal entry,
+planned place visit, event (saved from What's On or added by hand), and
+goal date range — instead of just entry/planned. Each block shows small
+colored bars for whichever apply, a hover/focus tooltip lists the specifics,
+and a row of filter chips dims days that don't match a chosen kind. Events
+and goals both support optional `end` dates, and every day in that range
+gets the corresponding bar, not just the start day. See the README's "The
+day strip" section for the details. Events you add yourself live in a new
+`customEvents` IndexedDB store (bumped `DB_VERSION` to 2) and are folded
+into backup/restore.

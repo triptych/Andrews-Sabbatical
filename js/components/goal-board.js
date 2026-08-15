@@ -1,6 +1,7 @@
 import sheet from '../shared-styles.js';
 import { bus } from '../events/bus.js';
 import { store, newId } from '../store.js';
+import { formatRange } from '../dates.js';
 
 const css = String.raw;
 
@@ -26,8 +27,17 @@ local.replaceSync(css`
     flex: 1 1 18rem;
   }
 
-  .add select {
+  .add select,
+  .add input[type='date'] {
     width: auto;
+  }
+
+  .when {
+    display: block;
+    font-family: var(--mono);
+    font-size: 0.75rem;
+    color: var(--ink-faint);
+    margin-top: 0.3rem;
   }
 
   .columns {
@@ -198,6 +208,14 @@ export class GoalBoard extends HTMLElement {
             <option value="goal">Goal — a way to spend the time</option>
           </select>
         </div>
+        <div>
+          <label for="start">Starts <span class="mono">(optional)</span></label>
+          <input type="date" id="start">
+        </div>
+        <div>
+          <label for="end">Ends <span class="mono">(optional)</span></label>
+          <input type="date" id="end">
+        </div>
         <button class="btn btn--primary" type="submit">Add</button>
       </form>
 
@@ -219,11 +237,20 @@ export class GoalBoard extends HTMLElement {
 
     this.shadowRoot.querySelector('#add').addEventListener('submit', (event) => {
       event.preventDefault();
-      const input = this.shadowRoot.querySelector('#text');
+      const form = this.shadowRoot;
+      const input = form.querySelector('#text');
       const text = input.value.trim();
       if (!text) return;
-      this.#create(text, this.shadowRoot.querySelector('#kind').value);
+      const start = form.querySelector('#start').value || undefined;
+      const end = form.querySelector('#end').value || undefined;
+      if (end && start && end < start) {
+        bus.emit('layout:toast', 'End date is before the start date');
+        return;
+      }
+      this.#create(text, form.querySelector('#kind').value, start, end);
       input.value = '';
+      form.querySelector('#start').value = '';
+      form.querySelector('#end').value = '';
       input.focus();
     });
 
@@ -233,13 +260,15 @@ export class GoalBoard extends HTMLElement {
     });
   }
 
-  async #create(text, kind) {
+  async #create(text, kind, start, end) {
     const item = {
       id: newId(),
       text,
       kind,
       done: false,
       notes: '',
+      start,
+      end,
       created: Date.now(),
     };
     await store.put('goals', item);
@@ -257,6 +286,26 @@ export class GoalBoard extends HTMLElement {
       const text = prompt('Progress note', item.notes ?? '');
       if (text === null) return;
       await store.put('goals', { ...item, notes: text.trim() });
+    } else if (action === 'dates') {
+      const start = prompt('Starts (YYYY-MM-DD, blank to clear)', item.start ?? '');
+      if (start === null) return;
+      const end = prompt('Ends (YYYY-MM-DD, blank for a single day / no date)', item.end ?? '');
+      if (end === null) return;
+      const cleanStart = start.trim() || undefined;
+      const cleanEnd = end.trim() || undefined;
+      if (cleanStart && !/^\d{4}-\d{2}-\d{2}$/.test(cleanStart)) {
+        bus.emit('layout:toast', 'Start date should look like YYYY-MM-DD');
+        return;
+      }
+      if (cleanEnd && !/^\d{4}-\d{2}-\d{2}$/.test(cleanEnd)) {
+        bus.emit('layout:toast', 'End date should look like YYYY-MM-DD');
+        return;
+      }
+      if (cleanEnd && cleanStart && cleanEnd < cleanStart) {
+        bus.emit('layout:toast', 'End date is before the start date');
+        return;
+      }
+      await store.put('goals', { ...item, start: cleanStart, end: cleanEnd });
     } else if (action === 'edit') {
       const text = prompt('Reword it', item.text);
       if (text === null || !text.trim()) return;
@@ -309,11 +358,14 @@ export class GoalBoard extends HTMLElement {
           </button>
           <div>
             <span class="text">${escapeHtml(item.text)}</span>
+            ${item.start ? `<span class="when">${escapeHtml(formatRange(item.start, item.end))}</span>` : ''}
             ${item.notes ? `<span class="progress">${escapeHtml(item.notes)}</span>` : ''}
           </div>
           <div class="row-tools">
             <button class="icon" type="button" data-action="note" data-id="${item.id}"
                     aria-label="Progress note">note</button>
+            <button class="icon" type="button" data-action="dates" data-id="${item.id}"
+                    aria-label="Set dates">dates</button>
             <button class="icon" type="button" data-action="edit" data-id="${item.id}"
                     aria-label="Reword">edit</button>
             <button class="icon remove" type="button" data-action="remove" data-id="${item.id}"

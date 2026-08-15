@@ -2,7 +2,12 @@ import sheet from '../shared-styles.js';
 import { bus } from '../events/bus.js';
 import { store, newId, exportAll, importAll } from '../store.js';
 import { PLACES } from '../data/places.js';
-import { START, END, formatLong, today, inWindow } from '../dates.js';
+import { EVENTS } from '../data/events.js';
+import { START, END, formatLong, formatRange, today, inWindow } from '../dates.js';
+
+/* Must match SAVED_EVENTS_KEY in store.js — the ids of events saved from
+   What's On, read the same way day-strip.js and event-list.js do. */
+const SAVED_KEY = 'sabbatical:events';
 
 const css = String.raw;
 
@@ -48,6 +53,64 @@ local.replaceSync(css`
     display: grid;
     grid-template-columns: 1fr 1fr;
     gap: 0.75rem;
+  }
+
+  /* ——— which day you're on, and what's already lined up for it ——— */
+
+  .day-head {
+    padding: 0.85rem 1rem;
+    background: var(--fog);
+    border-radius: var(--radius);
+    margin-bottom: 0.15rem;
+  }
+
+  .day-head h3 {
+    font-size: 1.2rem;
+    margin: 0.1rem 0 0;
+  }
+
+  .planned-list {
+    list-style: none;
+    padding: 0;
+    margin: 0.6rem 0 0;
+    display: grid;
+    gap: 0.35rem;
+  }
+
+  .planned-item {
+    display: flex;
+    align-items: baseline;
+    gap: 0.5em;
+    font-size: 0.8125rem;
+    color: var(--ink-soft);
+  }
+
+  .planned-item .dot {
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    background: var(--line);
+    flex: none;
+    transform: translateY(-1px);
+  }
+
+  .planned-item[data-kind='place'] .dot { background: var(--cranberry); }
+  .planned-item[data-kind='event'] .dot { background: var(--tide); }
+  .planned-item[data-kind='goal'] .dot { background: var(--sand); }
+
+  .planned-item b {
+    font-weight: 600;
+    color: var(--ink);
+  }
+
+  .planned-item .dim {
+    color: var(--ink-faint);
+  }
+
+  .planned-empty {
+    font-size: 0.8125rem;
+    color: var(--ink-faint);
+    margin: 0.6rem 0 0;
   }
 
   /* Grid and flex children default to min-width:auto, so the widest
@@ -250,6 +313,14 @@ export class JournalLog extends HTMLElement {
   #urls = [];
   #unsubscribe = [];
 
+  /* What's already lined up, independent of what's been written yet —
+     read fresh whenever place/event/goal data changes, then re-rendered
+     against whatever day the composer is currently pointed at. */
+  #placeState = [];
+  #customEvents = [];
+  #goals = [];
+  #savedEventIds = new Set();
+
   connectedCallback() {
     if (!this.shadowRoot) {
       this.attachShadow({ mode: 'open' });
@@ -257,9 +328,14 @@ export class JournalLog extends HTMLElement {
       this.#renderShell();
     }
     this.refresh();
+    this.#loadContext();
     this.#unsubscribe.push(
       bus.on('entries:changed', () => this.refresh()),
       bus.on('journal:open-day', (event) => this.focusDay(event.detail.date)),
+      bus.on('places:changed', () => this.#loadContext()),
+      bus.on('goals:changed', () => this.#loadContext()),
+      bus.on('events:changed', () => this.#loadContext()),
+      bus.on('events:restored', () => this.#loadContext()),
     );
   }
 
@@ -273,6 +349,7 @@ export class JournalLog extends HTMLElement {
   focusDay(date) {
     const field = this.shadowRoot.querySelector('#date');
     field.value = inWindow(date) ? date : today();
+    this.#paintPlanned();
     this.scrollIntoView({ behavior: 'smooth', block: 'start' });
     this.shadowRoot.querySelector('#title').focus();
   }
@@ -286,6 +363,74 @@ export class JournalLog extends HTMLElement {
     this.#paint();
   }
 
+  /** Reload place/event/goal state and repaint the "planned for this day" panel. */
+  async #loadContext() {
+    [this.#placeState, this.#goals, this.#customEvents] = await Promise.all([
+      store.all('placeState'),
+      store.all('goals'),
+      store.all('customEvents'),
+    ]);
+    try {
+      this.#savedEventIds = new Set(JSON.parse(localStorage.getItem(SAVED_KEY) ?? '[]'));
+    } catch {
+      this.#savedEventIds = new Set();
+    }
+    this.#paintPlanned();
+  }
+
+  /** Repaint the "you're on <day>" heading and the planned-for-this-day list,
+   * against whatever date the composer is currently pointed at. */
+  #paintPlanned() {
+    const root = this.shadowRoot;
+    const date = root.querySelector('#date').value;
+    if (!date) return;
+
+    root.querySelector('#day-heading').textContent = inWindow(date)
+      ? formatLong(date)
+      : `${formatLong(date)} — outside Sep 8 – Oct 9`;
+
+    const items = [];
+
+    for (const place of this.#placeState) {
+      if (place.plannedDate !== date) continue;
+      const found = PLACES.find((p) => p.id === place.id);
+      if (found) items.push({ kind: 'place', label: found.name, note: place.note });
+    }
+
+    const yourEvents = [
+      ...EVENTS.filter((event) => this.#savedEventIds.has(event.id)),
+      ...this.#customEvents,
+    ];
+    for (const event of yourEvents) {
+      if (date < event.start || date > (event.end ?? event.start)) continue;
+      const note = [event.where, event.end && event.end !== event.start ? formatRange(event.start, event.end) : '']
+        .filter(Boolean)
+        .join(' — ');
+      items.push({ kind: 'event', label: event.name, note });
+    }
+
+    for (const goal of this.#goals) {
+      if (!goal.start) continue;
+      if (date < goal.start || date > (goal.end ?? goal.start)) continue;
+      const note = goal.end && goal.end !== goal.start ? formatRange(goal.start, goal.end) : '';
+      items.push({ kind: 'goal', label: goal.text, note });
+    }
+
+    const container = root.querySelector('#planned');
+    container.innerHTML =
+      items.length === 0
+        ? `<p class="planned-empty">Nothing planned for this day yet — pin a place to it, save an event, or set a goal's dates.</p>`
+        : `<ul class="planned-list">${items
+            .map(
+              (item) => `
+              <li class="planned-item" data-kind="${item.kind}">
+                <i class="dot"></i>
+                <span><b>${escapeHtml(item.label)}</b>${item.note ? ` <span class="dim">— ${escapeHtml(item.note)}</span>` : ''}</span>
+              </li>`,
+            )
+            .join('')}</ul>`;
+  }
+
   #renderShell() {
     const options = PLACES.map(
       (place) => `<option value="${place.id}">${place.name}</option>`,
@@ -294,6 +439,12 @@ export class JournalLog extends HTMLElement {
     this.shadowRoot.innerHTML = `
       <div class="split">
         <form id="composer">
+          <div class="day-head">
+            <span class="eyebrow">You're on</span>
+            <h3 id="day-heading"></h3>
+            <div id="planned"></div>
+          </div>
+
           <div>
             <label for="title">What happened</label>
             <input type="text" id="title" required placeholder="Thor's Well at the wrong tide">
@@ -346,6 +497,9 @@ export class JournalLog extends HTMLElement {
 
     const root = this.shadowRoot;
     root.querySelector('#date').value = inWindow(today()) ? today() : START;
+    this.#paintPlanned();
+
+    root.querySelector('#date').addEventListener('input', () => this.#paintPlanned());
 
     root.querySelector('#composer').addEventListener('submit', (event) => {
       event.preventDefault();
@@ -507,7 +661,7 @@ export class JournalLog extends HTMLElement {
       bus.emit('events:restored');
       bus.emit(
         'layout:toast',
-        `Restored ${counts.entries} entries, ${counts.photos} photos, ${counts.goals} goals, ${counts.events} saved events`,
+        `Restored ${counts.entries} entries, ${counts.photos} photos, ${counts.goals} goals, ${counts.events} saved events, ${counts.customEvents} of your own events`,
       );
     } catch (error) {
       bus.emit('layout:toast', error.message ?? 'That file could not be read.');
